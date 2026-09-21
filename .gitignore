@@ -1,0 +1,82 @@
+# --- Virtual environments ---
+.venv/
+venv/
+env/
+ENV/
+
+# --- Python bytecode / cache ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+*.egg-info/
+.eggs/
+dist-info/
+
+# --- Secrets & local config ---
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+credentials.json
+secrets.json
+/settings.json
+/settings.json.bak
+
+# --- Logs & debug dumps ---
+*.log
+debug-*.log
+*.tmp
+*.temp
+
+# --- Browser / CDP profiles used by automation ---
+*.edge-cdp-profile/
+*.chrome-cdp-profile/
+*cdp-profile*/
+
+# --- PyInstaller ---
+*.spec
+build/
+dist/
+*.pkg
+warn-*.txt
+xref-*.html
+
+# --- Packaged / release archives (local builds) ---
+*.zip
+*.exe
+*.msi
+
+# --- IDE / editor ---
+.idea/
+.vscode/
+.cursor/
+*.swp
+*.swo
+*~
+
+# --- Local backups / nested copies / scratch ---
+availity_app_backup*/
+Molina Automation/
+SWHNY-automation/
+scratch_test_amida/
+test_output_tmp/
+_analyze.py
+_analyze2.py
+_port.py
+_rt.py
+*.xlsx
+SETTINGS.pdf
+features,md
+
+# --- OS junk ---
+.DS_Store
+Thumbs.db
+Desktop.ini
+ehthumbs.db
