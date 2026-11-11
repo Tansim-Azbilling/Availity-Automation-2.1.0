@@ -17,7 +17,7 @@ from openpyxl import load_workbook
 from availity_app.constants import STATUS_COLUMNS, resolved_output_columns
 from availity_app.utils import (
     format_invoice_number, normalize_search_date, safe_alt_patient_id,
-    safe_invoice_number, validate_dataframe,
+    safe_invoice_number, validate_dataframe, normalize_input_headers,
 )
 
 
@@ -117,8 +117,7 @@ def _sheet_rows(path):
             raise ValueError('The collection workbook has no header row.')
         headers = [str(value).strip() if value is not None else f'Unnamed: {i}'
                    for i, value in enumerate(raw_headers)]
-        if len(headers) != len(set(headers)):
-            raise ValueError('The collection workbook has duplicate column headers.')
+        headers = normalize_input_headers(headers)
         yield sheet.title, headers, iterator
     finally:
         workbook.close()

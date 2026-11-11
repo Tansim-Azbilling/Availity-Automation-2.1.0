@@ -159,6 +159,7 @@ from availity_app.utils import (
     service_dates_cross_year,
     retry_with_backoff,
     normalize_invoice_column,
+    normalize_input_headers,
     normalize_patient_names,
     results_row_matches_visit_and_amount,
     safe_alt_patient_id,
@@ -550,6 +551,7 @@ def load_excel(file_path):
             sheet_name = xl.sheet_names[0] if xl.sheet_names else 'Sheet1'
             state.loaded_sheet_name = sheet_name
             df = pd.read_excel(xl, sheet_name=sheet_name)
+        df.columns = normalize_input_headers(df.columns)
         if 'PatientName' in df.columns:
             parts = df['PatientName'].str.split(',', n=1, expand=True)
             df['Last_Name']  = parts[0].str.strip()

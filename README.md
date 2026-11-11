@@ -55,13 +55,13 @@ python -m playwright install chromium
 
 Required columns:
 
-- `AltPatientID`
-- `PatientName` (expected format: `LastName, FirstName`)
+- `Alt Patient ID` (or `AltPatientID`)
+- `Patient Name` (or `PatientName`; expected format: `LastName, FirstName`)
 - `DOB`
 - `StartDate`
 - `EndDate`
-- `InvoiceNumber`
-- `VisitDate`
+- `Invoice #` (or `InvoiceNumber`)
+- `Visit Date` (or `VisitDate`)
 
 Optional:
 

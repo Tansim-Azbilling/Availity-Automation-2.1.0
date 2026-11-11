@@ -17,6 +17,23 @@ from availity_app.constants import (
 )
 from availity_app.logging_gui import log_to_gui
 
+
+INPUT_HEADER_ALIASES = {
+    'Patient Name': 'PatientName',
+    'Visit Date': 'VisitDate',
+    'Invoice #': 'InvoiceNumber',
+    'Alt Patient ID': 'AltPatientID',
+}
+
+
+def normalize_input_headers(headers):
+    """Map collection headers to the field names used by the automation."""
+    normalized = [INPUT_HEADER_ALIASES.get(header, header) for header in headers]
+    if len(normalized) != len(set(normalized)):
+        raise ValueError('The collection workbook has duplicate column headers after mapping.')
+    return normalized
+
+
 def retry_with_backoff(action_name, fn, attempts=3, base_delay=0.7, max_delay=4.0, jitter=0.2):
     """Run a transient browser action with bounded retries and exponential backoff.
 

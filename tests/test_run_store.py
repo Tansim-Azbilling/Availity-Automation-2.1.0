@@ -20,6 +20,51 @@ HEADERS = [
 ]
 
 
+def test_collection_headers_map_in_both_import_paths(monkeypatch, tmp_path):
+    from availity_app.automation import load_and_prepare_excel
+
+    monkeypatch.setenv('LOCALAPPDATA', str(tmp_path))
+    source = tmp_path / 'collection.xlsx'
+    output = tmp_path / 'output'
+    _input(source, 1)
+    book = load_workbook(source)
+    sheet = book.active
+    for old, new in {
+        'AltPatientID': 'Alt Patient ID',
+        'PatientName': 'Patient Name',
+        'InvoiceNumber': 'Invoice #',
+        'VisitDate': 'Visit Date',
+    }.items():
+        sheet.cell(1, HEADERS.index(old) + 1, new)
+    book.save(source)
+
+    frame, stats = load_and_prepare_excel(source)
+    assert stats['total'] == 1
+    assert frame.at[0, 'AltPatientID'] == 'M0'
+    assert frame.at[0, 'PatientName'] == 'Doe, Jane'
+    assert frame.at[0, 'InvoiceNumber'] == 'I0'
+    assert frame.at[0, 'VisitDate'] == '01/10/2026'
+
+    path = open_or_import(source, output, 'Healthfirst')
+    store = RunStore(path)
+    assert store.at[0, 'AltPatientID'] == 'M0'
+    assert store.at[0, 'PatientName'] == 'Doe, Jane'
+    assert store.at[0, 'InvoiceNumber'] == 'I0'
+    assert store.invoice_indices('I0') == [0]
+    store.close()
+
+
+def test_collection_header_mapping_rejects_duplicate_field(monkeypatch, tmp_path):
+    monkeypatch.setenv('LOCALAPPDATA', str(tmp_path))
+    source = tmp_path / 'collection.xlsx'
+    _input(source, 1)
+    book = load_workbook(source)
+    book.active.cell(1, len(HEADERS) + 1, 'Patient Name')
+    book.save(source)
+    with pytest.raises(ValueError, match='duplicate column headers after mapping'):
+        open_or_import(source, tmp_path / 'output', 'Healthfirst')
+
+
 def _input(path, count):
     book = Workbook()
     sheet = book.active
