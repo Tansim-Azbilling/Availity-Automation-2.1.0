@@ -1,4 +1,4 @@
-# Availity Automation
+# Availity Automation 2.1.0
 
 Tkinter + Playwright desktop app that checks claim status in Availity from an Excel workbook and writes enriched results back to `Automated.xlsx`.
 
@@ -97,6 +97,12 @@ Use **Stop** to finish the active row, commit progress, and export `Automated.xl
 
 The live run database is under `%LOCALAPPDATA%\AvailityAutomation\runs`. This location must be writable and persist across VDI resets. Do not place the live database on a network share. `settings.json` remains beside the app.
 
+### SQLite run storage
+
+**Open Edge** streams the selected collection workbook into a local SQLite database. The app resumes that database when you reopen the same source file with the same output folder and payer. Claim results are committed as processing continues, so `Automated.xlsx` is an export snapshot, not the live progress store. The database contains claim and patient data; keep the local user profile protected and persistent, and include it when backing up an unfinished run.
+
+**Export current progress**, batch completion, and **Stop** write a full `Automated.xlsx` to the selected output folder. Exporting reads a consistent database snapshot while claim processing can continue. If an export fails, the previously exported workbook is preserved; retry after closing the workbook in Excel. To resume, reopen the original collection file with the same output folder and payer. Editing result cells in `Automated.xlsx` does not update the database; use **Import Recheck edits** to bring back only `Recheck` changes.
+
 If a matching `Automated.xlsx` already exists in the output folder, the first SQLite import copies its completed results after checking every row's member, invoice, and visit date. It then replays any newer `Automated_progress.jsonl` entries from the previous app. A mismatch stops the import so results cannot be attached to the wrong collection. The old files remain available for rollback. Keep the source workbook unchanged while a run is in progress; use a different output folder for a changed source file.
 
 Row stats (**Total Rows Read**, **Rows with Recheck**, **New Rows**) update after the file is loaded. An activity log and progress bar show live status.
@@ -140,7 +146,7 @@ Rows can be marked with statuses such as:
 - `Missing InvoiceNumber`
 - `Critical error`
 
-The app continues with later rows when one row fails. Mid-batch saves keep progress if you stop early.
+The app continues with later rows when one row fails. SQLite commits keep progress if you stop early.
 
 ## Adding a payer
 
@@ -180,4 +186,3 @@ No other code changes are required for the dropdown, navigation, or extraction p
 ## Disclaimer
 
 This tool automates interactions with payer portals. Use it in compliance with your organization's security, privacy, and portal usage policies.
-# Availity-Automation-2.1.0
