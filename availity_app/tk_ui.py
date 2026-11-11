@@ -35,6 +35,7 @@ from availity_app.ui_control import (
     reset_ui_state,
     set_save_progress_indeterminate,
     set_save_progress_status,
+    update_excel_row_stats,
 )
 
 
@@ -42,7 +43,7 @@ def _run_open_browser_in_background(payer, excel_path):
     """Spawn the Open Edge & Login worker thread."""
     thread = threading.Thread(
         target=open_edge_and_connect,
-        args=(payer, excel_path),
+        args=(payer, excel_path, state.output_folder_var.get()),
         daemon=True,
     )
     thread.start()
@@ -63,7 +64,7 @@ def browse_excel():
     filename = filedialog.askopenfilename(
         title="Select Collection File",
         filetypes=[
-            ("Excel files", "*.xlsx *.xls"),
+            ("Excel files", "*.xlsx"),
             ("All files", "*.*"),
         ],
     )
@@ -137,6 +138,9 @@ def validate_and_open_browser():
 def validate_and_start_automation():
     """Phase 2 callback: validate inputs (again) and run the Excel automation."""
 
+    if getattr(state, 'recheck_import_busy', False):
+        messagebox.showerror('Not ready', 'Wait for the Recheck import to finish.')
+        return
     if state.selected_payer_config is None:
         messagebox.showerror(
             "Not ready",
@@ -147,9 +151,15 @@ def validate_and_start_automation():
     validated = _validate_all_inputs()
     if validated is None:
         return
-    batch, excel_file, output_dir, _ = validated
+    batch, excel_file, output_dir, payer = validated
 
-    if state.loaded_df is None:
+    if (payer != state.selected_payer_name or
+            os.path.abspath(output_dir) != state.loaded_run_output_folder or
+            os.path.abspath(excel_file) != os.path.abspath(state.loaded_excel_path or '')):
+        messagebox.showerror('Not ready', 'The file, output folder, or payer changed. Click Open Edge again.')
+        return
+
+    if state.loaded_run_path is None:
         messagebox.showerror(
             "Not ready",
             "Excel data is not loaded. Click 'Open Edge' again to reload the file.",
@@ -202,6 +212,12 @@ def request_stop():
     state.resume_decision = "cancel"
     state.resume_event.set()
 
+    if state.loaded_run_path and state.current_batch_df is not None:
+        state.stop_save_requested = True
+        log_to_gui("💾 Finishing the active row, then exporting progress...\n", "info")
+        _apply_button_style(state.stop_button, "stop", False)
+        return
+
     batch_df = state.current_batch_df
     batch_folder = state.current_batch_output_folder
     if batch_df is not None and batch_folder:
@@ -213,8 +229,62 @@ def request_stop():
         return
 
     if not state.worker_busy:
+        if state.loaded_run_path:
+            export_current_progress()
         close_managed_edge_if_owned()
         reset_ui_state(clear_all=False)
+
+
+def export_current_progress():
+    """Write a full Excel snapshot without blocking Tk or claim processing."""
+    path = state.loaded_run_path
+    if not path:
+        messagebox.showerror('Not ready', 'Open a collection file before exporting.')
+        return
+
+    def _worker():
+        from availity_app.run_export import export_run
+        from availity_app.run_store import RunStore
+        try:
+            run = RunStore(path)
+            folder = run.meta['output_folder']
+            run.close()
+            saved = export_run(path, folder)
+            log_to_gui(f"  💾 Exported: {saved}\n", 'success')
+        except Exception as exc:
+            log_to_gui(f"  ❌ Export failed: {exc}\n", 'error')
+
+    threading.Thread(target=_worker, daemon=True).start()
+
+
+def import_recheck_workbook():
+    """Apply only Recheck edits from a matching exported workbook."""
+    path = state.loaded_run_path
+    if not path or state.worker_busy:
+        messagebox.showerror('Not ready', 'Open a collection file and wait for processing to finish.')
+        return
+    workbook = filedialog.askopenfilename(
+        title='Import Recheck edits', filetypes=[('Excel workbook', '*.xlsx')],
+    )
+    if not workbook:
+        return
+
+    def _worker():
+        from availity_app.run_store import RunStore, import_recheck_edits
+        try:
+            count = import_recheck_edits(path, workbook)
+            run = RunStore(path)
+            state.excel_row_stats = run.meta['stats']
+            update_excel_row_stats(state.excel_row_stats)
+            run.close()
+            log_to_gui(f"  ✓ Imported {count} Recheck edit(s).\n", 'success')
+        except Exception as exc:
+            log_to_gui(f"  ❌ Recheck import failed: {exc}\n", 'error')
+        finally:
+            state.recheck_import_busy = False
+
+    state.recheck_import_busy = True
+    threading.Thread(target=_worker, daemon=True).start()
 
 
 def create_gui():
@@ -657,13 +727,20 @@ def create_gui():
     )
     state.stop_button.pack(side=tk.LEFT, padx=8)
 
+    tools_frame = tk.Frame(main_frame, bg=COLOR_BG)
+    tools_frame.grid(row=9, column=0, columnspan=3, pady=(0, 14))
+    tk.Button(tools_frame, text="Export current progress",
+              command=export_current_progress, **button_kwargs).pack(side=tk.LEFT, padx=8)
+    tk.Button(tools_frame, text="Import Recheck edits",
+              command=import_recheck_workbook, **button_kwargs).pack(side=tk.LEFT, padx=8)
+
     _apply_button_style(state.open_edge_button, "open_edge", True)
     _apply_button_style(state.start_button, "start", False)
     _apply_button_style(state.stop_button, "stop", False)
 
     state.progress_frame = tk.Frame(main_frame, bg=COLOR_SURFACE, highlightthickness=1,
                                     highlightbackground=COLOR_BORDER)
-    state.progress_frame.grid(row=9, column=0, columnspan=3, sticky="ew", pady=(0, 16))
+    state.progress_frame.grid(row=10, column=0, columnspan=3, sticky="ew", pady=(0, 16))
 
     progress_inner = tk.Frame(state.progress_frame, bg=COLOR_SURFACE, padx=16, pady=14)
     progress_inner.pack(fill=tk.X, expand=True)
@@ -699,11 +776,11 @@ def create_gui():
     reset_automation_progress()
 
     _label(main_frame, "Activity Log", font=("Segoe UI", 10, "bold"), fg=COLOR_TEXT).grid(
-        row=10, column=0, sticky="w", pady=(6, 8),
+        row=11, column=0, sticky="w", pady=(6, 8),
     )
 
     log_wrap = tk.Frame(main_frame, bg=COLOR_BORDER)
-    log_wrap.grid(row=11, column=0, columnspan=3, sticky="nsew")
+    log_wrap.grid(row=12, column=0, columnspan=3, sticky="nsew")
 
     log_inner = tk.Frame(log_wrap, bg=COLOR_LOG_BG)
     log_inner.pack(fill=tk.BOTH, expand=True, padx=1, pady=1)
@@ -727,7 +804,7 @@ def create_gui():
     state.log_text.tag_config("success", foreground=COLOR_LOG_OK)
     state.log_text.tag_config("error", foreground=COLOR_LOG_ERR)
 
-    main_frame.grid_rowconfigure(11, weight=1)
+    main_frame.grid_rowconfigure(12, weight=1)
     main_frame.grid_columnconfigure(1, weight=1)
 
     state.settings_panel = tk.Frame(main_frame, bg=COLOR_BG)
@@ -984,7 +1061,7 @@ def create_gui():
     )
     row += 1
 
-    _settings_label(body, "Medium file save interval").grid(
+    _settings_label(body, "Medium save interval (legacy)").grid(
         row=row, column=0, sticky="w", pady=6, padx=(0, 16),
     )
     _settings_entry(body, state.medium_save_interval_var, width=12).grid(
@@ -992,7 +1069,7 @@ def create_gui():
     )
     row += 1
 
-    _settings_label(body, "Large file save interval").grid(
+    _settings_label(body, "Large save interval (legacy)").grid(
         row=row, column=0, sticky="w", pady=6, padx=(0, 16),
     )
     _settings_entry(body, state.large_save_interval_var, width=12).grid(

@@ -255,6 +255,8 @@ def invoice_row_indices(df, invoice_number):
     target = format_invoice_number(invoice_number, '')
     if not target:
         return []
+    if getattr(df, 'is_run_store', False):
+        return df.invoice_indices(target)
     from availity_app.invoice_index import get_invoice_index
 
     index = get_invoice_index(df)
@@ -1001,6 +1003,8 @@ def aggregate_invoice_visit_date_range(df, invoice_number):
     target_invoice = format_invoice_number(invoice_number)
     if not target_invoice:
         return None
+    if getattr(df, 'is_run_store', False):
+        return df.invoice_date_range(target_invoice)
 
     from availity_app.invoice_index import get_invoice_index
 

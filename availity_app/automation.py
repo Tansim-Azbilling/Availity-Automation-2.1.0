@@ -190,6 +190,8 @@ def _normalize_recheck_value(value):
 
 def compute_recheck_stats(df):
     """Return (total_rows, recheck_yes_count, recheck_empty_count) from the full sheet."""
+    if getattr(df, 'is_run_store', False):
+        return tuple(df.meta['stats'][key] for key in ('total', 'recheck_yes', 'recheck_empty'))
     total = len(df)
     if 'Recheck' not in df.columns:
         return total, 0, total
@@ -455,6 +457,8 @@ def row_should_process(df, idx):
 
 def _collect_pending_indices(df, limit=None):
     """Return pending row indexes, stopping after ``limit`` matches when set."""
+    if getattr(df, 'is_run_store', False):
+        return df.pending_indices(limit)
     n = 0 if df is None else len(df)
     if n == 0:
         return []
@@ -681,6 +685,9 @@ def save_progress_results(df, output_folder, *, force=False):
     ``force`` is accepted for call-site compatibility but no longer bypasses
     the Excel interval. Stop and final saves use ``save_results``.
     """
+    if getattr(df, 'is_run_store', False):
+        df.commit()
+        return
     del force
     raw_dirty = getattr(state, 'dirty_row_indices', None)
     if isinstance(raw_dirty, set) and raw_dirty:
@@ -779,6 +786,11 @@ def _replace_results_file(temp_path, dest_path):
 
 def _write_results_file(df, output_folder, *, finalize=True):
     """Write df to Automated.xlsx (used by sync and async save paths)."""
+    if getattr(df, 'is_run_store', False):
+        from availity_app.run_export import export_run
+        saved_path = export_run(df.path, output_folder)
+        log_to_gui(f"  💾 Saved: {saved_path}\n", "info")
+        return saved_path
     _acquire_save_lock()
     if finalize:
         status = (
@@ -847,8 +859,10 @@ def save_results(df, output_folder, *, finalize=True):
     return _write_results_file(df, output_folder, finalize=finalize)
 
 
-def _run_finalize_save(df, output_folder, *, timeout=300.0):
+def _run_finalize_save(df, output_folder, *, timeout=None):
     """Run formatted save on a background thread; block caller until done."""
+    if getattr(df, 'is_run_store', False):
+        df.commit()
     done = threading.Event()
     result = {'path': None}
 
@@ -861,6 +875,8 @@ def _run_finalize_save(df, output_folder, *, timeout=300.0):
                 else "Saving results…"
             )
             result['path'] = save_results(df, output_folder, finalize=True)
+        except Exception as exc:
+            log_to_gui(f"  ❌ Final export failed: {exc}\n", "error")
         finally:
             set_save_progress_indeterminate(False)
             done.set()
@@ -892,6 +908,11 @@ def _mark_row_dirty(row_index):
 
 def write_row_result(df, row_index, result_dict):
     """Apply every key/value in result_dict to the given dataframe row in-place."""
+    if getattr(df, 'is_run_store', False):
+        for field, value in result_dict.items():
+            if field in df.columns:
+                df.at[row_index, field] = value
+        return
     with state.df_mutate_lock:
         for field, value in result_dict.items():
             if field in df.columns and pd.api.types.is_numeric_dtype(df[field].dtype):
@@ -902,6 +923,10 @@ def write_row_result(df, row_index, result_dict):
 
 def safe_mark_row_status(df, row_index, status, err=''):
     """Safely update row processing status columns."""
+    if getattr(df, 'is_run_store', False):
+        df.at[row_index, 'AutomationStatus'] = status
+        df.at[row_index, 'LastError'] = err
+        return
     with state.df_mutate_lock:
         for col in STATUS_COLUMNS:
             if col in df.columns and pd.api.types.is_numeric_dtype(df[col].dtype):
@@ -8209,7 +8234,7 @@ def _reload_and_navigate(page, payer_config):
 # SECTION 17 — BATCH PROCESSING
 # ============================================================================
 
-def open_edge_and_connect(payer_name, excel_path):
+def open_edge_and_connect(payer_name, excel_path, output_folder=None):
     """Phase 1: load Excel, then launch Edge with CDP and normalize tabs.
 
     Runs in a background thread (spawned by the GUI). Excel is read before any
@@ -8224,6 +8249,7 @@ def open_edge_and_connect(payer_name, excel_path):
     """
     state.worker_busy = True
     user_stopped = False
+    output_folder = output_folder or os.path.dirname(os.path.abspath(excel_path))
     try:
         payer_config = resolve_payer_config(payer_name)
         if not payer_config:
@@ -8231,14 +8257,29 @@ def open_edge_and_connect(payer_name, excel_path):
             _set_ui_state(UI_STATE_IDLE)
             return
 
-        log_to_gui("📂 Loading Excel file...\n", "info")
-        df, stats = load_and_prepare_excel(excel_path, payer_config)
-        if df is None:
+        log_to_gui("📂 Importing collection file into SQLite...\n", "info")
+        from availity_app.run_store import RunStore, open_or_import
+        try:
+            def _import_progress(count):
+                if not state.is_running:
+                    raise InterruptedError('Import stopped by user.')
+                log_to_gui(f"  → Imported {count:,} rows...\n", "info")
+
+            run_path = open_or_import(
+                excel_path, output_folder, payer_name, payer_config,
+                progress=_import_progress,
+            )
+            run = RunStore(run_path)
+            stats = run.meta['stats']
+            run.close()
+        except Exception as exc:
+            log_to_gui(f"❌ Could not import collection file: {exc}\n", "error")
             state.is_running = False
             _set_ui_state(UI_STATE_IDLE)
             return
 
-        state.loaded_df = df
+        state.loaded_run_path = run_path
+        state.loaded_run_output_folder = os.path.abspath(output_folder)
         state.loaded_excel_path = excel_path
         state.excel_row_stats = stats
         update_excel_row_stats(stats)
@@ -8345,30 +8386,15 @@ def run_batch(batch_size, excel_path, output_folder):
             payer_config = resolved
             state.selected_payer_config = payer_config
 
-        if state.loaded_df is None or state.loaded_excel_path != excel_path:
-            log_to_gui("📂 Reloading Excel file...\n", "info")
-            df, stats = load_and_prepare_excel(excel_path, payer_config)
-            if df is None:
-                return
-            state.loaded_df = df
+        from availity_app.run_store import RunStore, open_or_import
+        run_path = state.loaded_run_path
+        if not run_path or state.loaded_excel_path != excel_path:
+            run_path = open_or_import(excel_path, output_folder, payer_name, payer_config)
+            state.loaded_run_path = run_path
             state.loaded_excel_path = excel_path
-            state.excel_row_stats = stats
-            update_excel_row_stats(stats)
-        else:
-            df = state.loaded_df
-
-        replayed = replay_wal(df, output_folder)
-        if replayed:
-            log_to_gui(
-                f"  ℹ️ Replayed {replayed} progress log row(s) from the last run\n",
-                "info",
-            )
-            total, recheck_yes, recheck_empty = compute_recheck_stats(df)
-            state.excel_row_stats = {
-                'total': total,
-                'recheck_yes': recheck_yes,
-                'recheck_empty': recheck_empty,
-            }
+        df = RunStore(run_path)
+        df.recover_in_progress()
+        state.excel_row_stats = df.meta['stats']
 
         stats = state.excel_row_stats or compute_recheck_stats(df)
         update_excel_row_stats(stats)
@@ -8427,9 +8453,10 @@ def run_batch(batch_size, excel_path, output_folder):
             },
         )
         # #endregion
-        df = apply_claim_not_found_completed_rows(df)
-        df = queue_recheck_yes_rows(df)
-        df = queue_error_rows_for_retry(df)
+        if not getattr(df, 'is_run_store', False):
+            df = apply_claim_not_found_completed_rows(df)
+            df = queue_recheck_yes_rows(df)
+            df = queue_error_rows_for_retry(df)
         # #region agent log
         _after_apply = time.perf_counter()
         _agent_log(
@@ -8443,7 +8470,8 @@ def run_batch(batch_size, excel_path, output_folder):
         # Expose for emergency save from the GUI thread (Stop button).
         state.current_batch_df = df
         state.current_batch_output_folder = output_folder
-        start_save_worker()
+        if not getattr(df, 'is_run_store', False):
+            start_save_worker()
         pending_indices = _collect_pending_indices(df, limit=batch_size)
         work_queue = list(pending_indices)
         # #region agent log
@@ -8697,7 +8725,7 @@ def run_batch(batch_size, excel_path, output_folder):
             group_pos += 1
 
         log_to_gui("-" * 60 + "\n")
-        if not state.stop_save_requested:
+        if getattr(df, 'is_run_store', False) or not state.stop_save_requested:
             _run_finalize_save(df, output_folder)
         else:
             log_to_gui("  ℹ️ Final save handled by Stop — skipping duplicate.\n", "info")
@@ -8726,12 +8754,15 @@ def run_batch(batch_size, excel_path, output_folder):
     except Exception as e:
         log_to_gui(f"❌ Critical batch error: {e}\n", "error")
         log_to_gui(traceback.format_exc(), "error")
-        if df is not None and not state.stop_save_requested:
+        if df is not None and (getattr(df, 'is_run_store', False) or not state.stop_save_requested):
             _run_finalize_save(df, output_folder)
     finally:
         user_stopped = not state.is_running
         state.worker_busy = False
-        stop_save_worker(wait=True)
+        if getattr(df, 'is_run_store', False):
+            df.close()
+        else:
+            stop_save_worker(wait=True)
         state.current_batch_df = None
         state.current_batch_output_folder = None
         state.current_payer_name = None

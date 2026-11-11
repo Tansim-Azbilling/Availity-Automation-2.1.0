@@ -4,13 +4,13 @@ Tkinter + Playwright desktop app that checks claim status in Availity from an Ex
 
 ## What this app does
 
-- Loads an Excel collection file (`.xlsx` / `.xls`).
+- Streams an Excel collection file (`.xlsx`) into a local SQLite run database.
 - Opens Microsoft Edge with remote debugging (CDP) and connects via Playwright.
 - Runs a two-phase workflow: **Open Edge** (load file + browser) → sign in → **Start Automation**.
 - Searches Availity claim status for the selected payer, matching rows by `InvoiceNumber` and visit/service dates.
 - Extracts claim details (status, amounts, denial reason, finalized/check data).
 - Supports **Recheck** (`yes` / `no` / empty) for resume and selective re-runs.
-- Saves progress continuously to a single `Automated.xlsx` in the output folder.
+- Commits claim progress to SQLite after each row or search group and exports a complete `Automated.xlsx` at batch end or on Stop.
 
 ## Supported payers
 
@@ -83,25 +83,29 @@ python Availity_Automation.py
 
 In the GUI:
 
-1. Select **Collection File** (input Excel).
+1. Select **Collection File** (input `.xlsx`).
 2. Select **Output Folder**.
 3. Enter **Claim Search Limit** (positive integer batch size).
 4. Choose **Select Payer** (all configured payers are listed).
-5. Click **Open Edge** — loads the workbook and launches Edge.
+5. Click **Open Edge** — imports or resumes the run and launches Edge.
 6. Sign in to Availity in the Edge window when prompted.
 7. Click **Start Automation**.
 
 Settings (OrgID, Payer ID, NPI, and payer flags) are stored in `settings.json` in the same folder as the app — next to the `.exe` or next to `Availity_Automation.py`. Zip that folder when sharing a configured copy; do not send the `.exe` alone.
 
-Use **Stop** to request a graceful stop and save progress to `Automated.xlsx`.
+Use **Stop** to finish the active row, commit progress, and export `Automated.xlsx`. **Export current progress** can create a snapshot during a run. To rerun completed rows, edit `Recheck` in the exported workbook and use **Import Recheck edits** before starting another batch; only Recheck values are imported.
+
+The live run database is under `%LOCALAPPDATA%\AvailityAutomation\runs`. This location must be writable and persist across VDI resets. Do not place the live database on a network share. `settings.json` remains beside the app.
+
+If a matching `Automated.xlsx` already exists in the output folder, the first SQLite import copies its completed results after checking every row's member, invoice, and visit date. It then replays any newer `Automated_progress.jsonl` entries from the previous app. A mismatch stops the import so results cannot be attached to the wrong collection. The old files remain available for rollback. Keep the source workbook unchanged while a run is in progress; use a different output folder for a changed source file.
 
 Row stats (**Total Rows Read**, **Rows with Recheck**, **New Rows**) update after the file is loaded. An activity log and progress bar show live status.
 
 ## Output files
 
-The app writes a single workbook in your output folder:
+The app writes a full workbook snapshot in your output folder:
 
-- `Automated.xlsx` — progress during the run and final results
+- `Automated.xlsx` — all imported rows, including pending rows, at each export
 
 Added / maintained output columns include:
 
@@ -176,3 +180,4 @@ No other code changes are required for the dropdown, navigation, or extraction p
 ## Disclaimer
 
 This tool automates interactions with payer portals. Use it in compliance with your organization's security, privacy, and portal usage policies.
+# Availity-Automation-2.1.0

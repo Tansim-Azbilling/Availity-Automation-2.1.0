@@ -7,7 +7,7 @@ The panel is split into two sections:
 - **All payers** — values that apply to every payer (and to the app as a whole).
 - **Selected payer** — values that apply only to the payer currently chosen on the main screen (**Select Payer**). Changing that dropdown reloads this section.
 
-Settings are saved to a local JSON file, not into the Excel workbook.
+Settings remain in a local JSON file. Claim run data and progress are stored separately in SQLite under `%LOCALAPPDATA%\AvailityAutomation\runs`.
 
 The file is `settings.json` in the **same folder as the app**:
 
@@ -95,23 +95,19 @@ Stages include labels such as `Navigation failed`, `Form error`, `Search failed`
 
 ### Medium file save interval
 
-How often to write mid-batch progress to `Automated.xlsx` when the workbook has **101–500** rows.
+Legacy setting retained in `settings.json` for compatibility. SQLite runs commit completed rows directly; this interval does not control their progress or Excel export.
 
-A save also runs if at least 20 seconds have passed since the last save, even if fewer rows have been processed.
-
-Workbooks with 100 rows or fewer save after every completed row; this interval does not apply to those files.
-
-**Default:** `10` (every 10 processed rows)  
+**Default:** `10` (retained legacy value)
 **Validation:** whole number, at least `1`.
 
 ### Large file save interval
 
-Same idea for workbooks with **more than 500** rows. A save also runs if at least 30 seconds have passed since the last save.
+Legacy setting retained for compatibility; SQLite runs do not use it.
 
 **Default:** `25`  
 **Validation:** whole number, at least `1`.
 
-Lower intervals write more often (safer if you stop early; slower). Higher intervals reduce Excel write overhead on large files.
+Excel is exported on request, at batch end, and on Stop.
 
 ### Search miss phrases
 

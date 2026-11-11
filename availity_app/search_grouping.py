@@ -152,6 +152,10 @@ def resolve_patient_cluster_search_dates(df, row_data, safe_field_fn=None):
     identity = patient_identity_key(row_data, safe_field_fn)
     if not identity[0] or not identity[1]:
         return '', ''
+    if getattr(df, 'is_run_store', False):
+        import json
+        clusters = cluster_visit_dates(df.patient_dates(json.dumps(identity)))
+        return _cluster_range_containing(visit_dt, clusters)
     clusters = _patient_cluster_cache(df, safe_field_fn).get(identity) or []
     return _cluster_range_containing(visit_dt, clusters)
 

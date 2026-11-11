@@ -36,6 +36,9 @@ _large_autofit_notice_logged = False
 
 loaded_df = None
 loaded_excel_path = None
+loaded_run_path = None
+loaded_run_output_folder = None
+recheck_import_busy = False
 excel_row_stats = None
 
 root = None
